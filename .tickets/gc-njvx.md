@@ -1,6 +1,6 @@
 ---
 id: gc-njvx
-status: open
+status: closed
 deps: [gc-jiqo, gc-cbne]
 links: []
 created: 2026-04-03T21:40:07Z
