@@ -1,6 +1,6 @@
 ---
 id: gc-6x2b
-status: open
+status: closed
 deps: [gc-jiqo]
 links: []
 created: 2026-04-03T21:40:07Z

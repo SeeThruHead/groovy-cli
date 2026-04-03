@@ -1,12 +1,11 @@
 //! Test pattern generation and send loop for MiSTer modeline calibration.
 //!
 //! Pattern generation is pure (no I/O) and fully testable.
-//! The send loop uses raw UDP (no GroovyConnection) for simplicity.
+//! The send loop uses GroovyConnection for protocol-correct transport.
 
-use crate::groovy::{self, Modeline};
+use crate::connection::GroovyConnection;
+use crate::groovy::Modeline;
 use anyhow::Result;
-use socket2::{Domain, Protocol, Socket, Type};
-use std::net::UdpSocket;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -136,23 +135,18 @@ pub fn send_test_pattern(
         }).ok();
     }
 
-    let sock = create_udp_socket(mister_ip)?;
-    sock.send(&groovy::build_init(0, 0, 0, 0))?;
-    std::thread::sleep(Duration::from_millis(200));
-    sock.send(&groovy::build_switchres(modeline))?;
-    std::thread::sleep(Duration::from_millis(500));
+    let mut conn = GroovyConnection::connect(mister_ip)?;
+    conn.init(modeline)?;
 
-    let mtu = groovy::DEFAULT_MTU;
     let vsync = modeline.v_begin;
-    let field_interval = Duration::from_micros(std::cmp::max(8000, (1_000_000.0 / field_rate) as u64));
     let mut frame_count: u32 = 0;
     let mut current_field: u8 = 0;
-    let mut next_tick = Instant::now();
     let deadline = Instant::now() + Duration::from_secs(duration_secs);
 
     eprintln!("Sending test pattern...");
 
     while running.load(Ordering::Relaxed) && Instant::now() < deadline {
+        let start = Instant::now();
         frame_count += 1;
         let data = if modeline.interlace {
             if current_field == 0 { &field0 } else { &field1 }
@@ -160,37 +154,19 @@ pub fn send_test_pattern(
             &field0
         };
 
-        let _ = sock.send(&groovy::build_blit(frame_count, current_field, vsync, None));
-        let mut off = 0;
-        while off < data.len() {
-            let end = (off + mtu).min(data.len());
-            let _ = sock.send(&data[off..end]);
-            off = end;
-        }
+        conn.blit(data, frame_count, current_field, vsync);
 
         if modeline.interlace {
             current_field = if current_field == 0 { 1 } else { 0 };
         }
 
-        next_tick += field_interval;
-        let now = Instant::now();
-        if next_tick > now { spin_sleep::sleep(next_tick - now); }
-        else { next_tick = now; }
+        let elapsed_ns = start.elapsed().as_nanos() as u64;
+        conn.wait_sync(elapsed_ns);
     }
 
-    let _ = sock.send(&groovy::build_close());
+    // conn.close() called automatically via Drop
     eprintln!("Done");
     Ok(())
-}
-
-fn create_udp_socket(mister_ip: &str) -> Result<UdpSocket> {
-    let s = Socket::new(Domain::IPV4, Type::DGRAM, Some(Protocol::UDP))?;
-    s.set_send_buffer_size(2 * 1024 * 1024)?;
-    s.bind(&"0.0.0.0:0".parse::<std::net::SocketAddr>().unwrap().into())?;
-    let dest: std::net::SocketAddr = format!("{}:{}", mister_ip, groovy::UDP_PORT).parse()?;
-    s.connect(&dest.into())?;
-    s.set_nonblocking(false)?;
-    Ok(s.into())
 }
 
 // ── Tests ──
