@@ -1,6 +1,6 @@
 ---
 id: gc-ecqu
-status: open
+status: closed
 deps: [gc-q73b]
 links: []
 created: 2026-04-03T21:40:07Z
