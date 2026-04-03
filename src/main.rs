@@ -99,10 +99,19 @@ enum Commands {
     },
     PlayKey {
         key: u64,
-        /// Audio language
         #[arg(short, long)] audio: Option<String>,
-        /// Subtitle language ("none" to disable)
         #[arg(long)] subs: Option<String>,
+    },
+    /// Play a local video file
+    File {
+        /// Path to video file
+        path: String,
+        /// Audio track index (0-based)
+        #[arg(short, long)] audio: Option<u32>,
+        /// Subtitle track index (0-based), or "none"
+        #[arg(long)] subs: Option<String>,
+        /// Seek to position in seconds
+        #[arg(long)] seek: Option<f64>,
     },
     #[command(alias = "ondeck")]
     Continue,
@@ -235,6 +244,10 @@ fn main() -> Result<()> {
         Commands::PlayKey { key, audio, subs } => {
             println!("Playing key={}", key);
             stream_to_mister(&plex, *key, &rcfg.mister, &rcfg.modeline()?, rcfg.scale, audio.as_deref(), subs.as_deref(), None)?;
+        }
+        Commands::File { path, audio, subs, seek } => {
+            let modeline = rcfg.modeline()?;
+            stream_file(path, &rcfg.mister, &modeline, rcfg.scale, *audio, subs.as_deref(), *seek)?;
         }
         Commands::Stop => {
             let sock = UdpSocket::bind("0.0.0.0:0")?;
@@ -578,6 +591,245 @@ fn stream_to_mister(
 }
 
 // ── Helpers ──
+
+fn stream_file(
+    path: &str, mister_ip: &str, modeline: &Modeline, scale: f64,
+    audio_track: Option<u32>, sub_option: Option<&str>, seek_override: Option<f64>,
+) -> Result<()> {
+    let ffmpeg = find_ffmpeg()?;
+    let url = path;
+
+    if !std::path::Path::new(path).exists() {
+        bail!("File not found: {}", path);
+    }
+
+    let w = modeline.h_active as usize;
+    let h = modeline.v_active as usize;
+    let field_h = if modeline.interlace { h / 2 } else { h };
+    let field_size = w * field_h * 3;
+    let frame_rate = modeline.p_clock * 1_000_000.0 / (modeline.h_total as f64 * modeline.v_total as f64);
+    let field_rate = if modeline.interlace { frame_rate * 2.0 } else { frame_rate };
+    let ffmpeg_fps = field_rate;
+    let ffmpeg_h = field_h;
+    let ffmpeg_frame_size = field_size;
+
+    eprintln!("File: {}", path);
+    eprintln!("{}x{}{} @ {:.2} fields/s, field={}B",
+        w, h, if modeline.interlace { "i" } else { "p" }, field_rate, field_size);
+
+    let seek_secs = seek_override.unwrap_or(0.0);
+    if seek_secs > 0.0 { eprintln!("Seeking to {:.0}s", seek_secs); }
+
+    // Extract subtitles if requested
+    let _sub_tempfile: Option<tempfile::NamedTempFile>;
+    let sub_path: Option<String>;
+    let disabled = sub_option.map(|s| s.eq_ignore_ascii_case("none") || s == "off").unwrap_or(false);
+    if !disabled {
+        // Try to extract subtitle track
+        let sub_idx = if let Some(ref s) = sub_option {
+            if let Ok(n) = s.parse::<u32>() { Some(n) } else { None }
+        } else {
+            Some(0) // default: first subtitle track
+        };
+        if let Some(idx) = sub_idx {
+            let tmp = tempfile::Builder::new().prefix("groovy-sub-").suffix(".ass")
+                .tempfile().context("temp sub file")?;
+            let mut sub_args: Vec<String> = vec![];
+            if seek_secs > 0.0 { sub_args.extend(["-ss".into(), format!("{:.3}", seek_secs)]); }
+            sub_args.extend(["-i".into(), url.into(), "-map".into(), format!("0:s:{}", idx),
+                "-y".into(), "-v".into(), "error".into(), tmp.path().to_string_lossy().into()]);
+            let r = Command::new(&ffmpeg).args(&sub_args).output()?;
+            if r.status.success() {
+                let p = tmp.path().to_string_lossy().to_string();
+                eprintln!("Subs: track {} -> {}", idx, p);
+                sub_path = Some(p); _sub_tempfile = Some(tmp);
+            } else {
+                eprintln!("No subtitle track {}, continuing without", idx);
+                sub_path = None; _sub_tempfile = None;
+            }
+        } else { sub_path = None; _sub_tempfile = None; }
+    } else { sub_path = None; _sub_tempfile = None; }
+
+    // FFmpeg video args
+    let mut vargs: Vec<String> = vec!["-re".into()];
+    if seek_secs > 0.0 { vargs.extend(["-ss".into(), format!("{:.3}", seek_secs)]); }
+    vargs.extend(["-i".into(), url.into()]);
+
+    let vid_w = ((w as f64 * scale) as usize) & !1;
+    let vid_h = ((ffmpeg_h as f64 * scale) as usize) & !1;
+    let pad_x = (w - vid_w) / 2;
+    let pad_y = (ffmpeg_h - vid_h) / 2;
+    if scale < 1.0 {
+        eprintln!("Scale {:.0}%: {}x{} padded to {}x{}", scale * 100.0, vid_w, vid_h, w, ffmpeg_h);
+    }
+
+    if let Some(ref sp) = sub_path {
+        vargs.extend([
+            "-filter_complex".into(),
+            format!("[0:v:0]scale={}:{}[v];[v]subtitles=filename={}:original_size={}x{}[s];[s]pad={}:{}:{}:{}:black[out]",
+                vid_w, vid_h, sp, vid_w, vid_h, w, ffmpeg_h, pad_x, pad_y),
+            "-map".into(), "[out]".into(),
+        ]);
+    } else if scale < 1.0 {
+        vargs.extend([
+            "-filter_complex".into(),
+            format!("[0:v:0]scale={}:{}[v];[v]pad={}:{}:{}:{}:black[out]", vid_w, vid_h, w, ffmpeg_h, pad_x, pad_y),
+            "-map".into(), "[out]".into(),
+        ]);
+    } else {
+        vargs.extend(["-map".into(), "0:v:0".into(), "-s".into(), format!("{}x{}", w, ffmpeg_h)]);
+    }
+    vargs.extend(["-f".into(), "rawvideo".into(), "-pix_fmt".into(), "bgr24".into(),
+        "-r".into(), format!("{:.4}", ffmpeg_fps), "-vsync".into(), "cfr".into(),
+        "-v".into(), "error".into(), "-nostdin".into(), "pipe:1".into()]);
+
+    // FFmpeg audio args
+    let mut aargs: Vec<String> = vec!["-re".into()];
+    if seek_secs > 0.0 { aargs.extend(["-ss".into(), format!("{:.3}", seek_secs)]); }
+    let audio_map = if let Some(ai) = audio_track { format!("0:a:{}", ai) } else { "0:a:0".into() };
+    aargs.extend(["-i", url, "-map", &audio_map, "-ac", "2", "-ar", "48000",
+        "-f", "s16le", "-acodec", "pcm_s16le", "-v", "warning", "-nostdin", "pipe:1",
+    ].iter().map(|s| s.to_string()));
+
+    // Start FFmpeg
+    eprintln!("Starting FFmpeg...");
+    let mut video_proc = Command::new(&ffmpeg).args(&vargs)
+        .stdout(Stdio::piped()).stderr(Stdio::piped()).spawn().context("FFmpeg video")?;
+    let mut audio_proc = Command::new(&ffmpeg).args(&aargs)
+        .stdout(Stdio::piped()).stderr(Stdio::null()).spawn().context("FFmpeg audio")?;
+    let video_stdout = video_proc.stdout.take().unwrap();
+    let audio_stdout = audio_proc.stdout.take().unwrap();
+
+    let latest_frame: Arc<Mutex<Option<Vec<u8>>>> = Arc::new(Mutex::new(None));
+    let first_video_frame = Arc::new(AtomicBool::new(false));
+    let video_ended = Arc::new(AtomicBool::new(false));
+    let running = Arc::new(AtomicBool::new(true));
+    ctrlc_handler(running.clone());
+
+    {
+        let latest = latest_frame.clone();
+        let first = first_video_frame.clone();
+        let ended = video_ended.clone();
+        let running = running.clone();
+        std::thread::Builder::new().name("video-reader".into()).spawn(move || {
+            let mut reader = video_stdout;
+            let mut buf = vec![0u8; ffmpeg_frame_size];
+            while running.load(Ordering::Relaxed) {
+                let mut filled = 0;
+                while filled < ffmpeg_frame_size {
+                    match reader.read(&mut buf[filled..]) {
+                        Ok(0) | Err(_) => { ended.store(true, Ordering::Relaxed); return; }
+                        Ok(n) => filled += n,
+                    }
+                }
+                *latest.lock().unwrap() = Some(buf.clone());
+                first.store(true, Ordering::Relaxed);
+            }
+        })?;
+    }
+
+    eprintln!("Waiting for first frame...");
+    loop {
+        if first_video_frame.load(Ordering::Relaxed) { break; }
+        if video_ended.load(Ordering::Relaxed) {
+            let _ = video_proc.wait();
+            let mut err = String::new();
+            if let Some(mut se) = video_proc.stderr.take() { let _ = se.read_to_string(&mut err); }
+            let _ = audio_proc.kill();
+            bail!("FFmpeg no video. Stderr:\n{}", err);
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    eprintln!("Got first frame.");
+
+    let sock = Arc::new(Mutex::new(create_udp_socket(mister_ip)?));
+    eprintln!("Connected to {}:{}", mister_ip, groovy::UDP_PORT);
+
+    { let s = sock.lock().unwrap(); s.send(&groovy::build_init(0, 3, 2, 0))?; }
+    std::thread::sleep(Duration::from_millis(200));
+    { let s = sock.lock().unwrap(); s.send(&groovy::build_switchres(modeline))?; }
+    std::thread::sleep(Duration::from_millis(500));
+
+    let audio_sock = sock.clone();
+    let audio_running = running.clone();
+    let audio_first = first_video_frame.clone();
+    let audio_thread = std::thread::Builder::new().name("audio".into()).spawn(move || {
+        let mut reader = audio_stdout;
+        let mut buf = vec![0u8; 4800];
+        while audio_running.load(Ordering::Relaxed) {
+            if audio_first.load(Ordering::Relaxed) { break; }
+            match reader.read(&mut buf[..3840]) { Ok(0) | Err(_) => return, _ => {} }
+        }
+        let mut discarded = 0;
+        while discarded < 57600 && audio_running.load(Ordering::Relaxed) {
+            let n = std::cmp::min(3840, 57600 - discarded);
+            match reader.read(&mut buf[..n]) { Ok(0) | Err(_) => return, Ok(n) => discarded += n }
+        }
+        let mtu = groovy::DEFAULT_MTU;
+        while audio_running.load(Ordering::Relaxed) {
+            match reader.read(&mut buf) {
+                Ok(0) | Err(_) => break,
+                Ok(n) => {
+                    let hdr = groovy::build_audio(n as u16);
+                    let s = audio_sock.lock().unwrap();
+                    let _ = s.send(&hdr);
+                    let mut off = 0;
+                    while off < n { let end = (off + mtu).min(n); let _ = s.send(&buf[off..end]); off = end; }
+                    drop(s);
+                }
+            }
+        }
+    })?;
+
+    let mut frame_count: u32 = 0;
+    let mut current_field: u8 = 0;
+    let mtu = groovy::DEFAULT_MTU;
+    let vsync = modeline.v_begin;
+    let field_interval_us = std::cmp::max(8000, (1_000_000.0 / field_rate) as u64);
+    let field_interval = Duration::from_micros(field_interval_us);
+    let is_sending = AtomicBool::new(false);
+    let mut next_tick = Instant::now();
+
+    eprintln!("Streaming...");
+
+    while running.load(Ordering::Relaxed) {
+        if video_ended.load(Ordering::Relaxed) { eprintln!("Stream ended"); break; }
+        if is_sending.load(Ordering::Relaxed) {
+            next_tick += field_interval;
+            spin_sleep::sleep(field_interval);
+            continue;
+        }
+        let frame = latest_frame.lock().unwrap().clone();
+        let Some(frame_data) = frame else { spin_sleep::sleep(Duration::from_millis(1)); continue; };
+        is_sending.store(true, Ordering::Relaxed);
+
+        frame_count += 1;
+        {
+            let s = sock.lock().unwrap();
+            let _ = s.send(&groovy::build_blit_field_vsync(frame_count, current_field, vsync, None));
+            let mut off = 0;
+            while off < frame_data.len() {
+                let end = (off + mtu).min(frame_data.len());
+                let _ = s.send(&frame_data[off..end]);
+                off = end;
+            }
+        }
+        if modeline.interlace { current_field = if current_field == 0 { 1 } else { 0 }; }
+        is_sending.store(false, Ordering::Relaxed);
+
+        next_tick += field_interval;
+        let now = Instant::now();
+        if next_tick > now { spin_sleep::sleep(next_tick - now); } else { next_tick = now; }
+    }
+
+    { let _ = sock.lock().unwrap().send(&groovy::build_close()); }
+    running.store(false, Ordering::Relaxed);
+    let _ = video_proc.kill();
+    let _ = audio_proc.kill();
+    audio_thread.join().ok();
+    eprintln!("Done");
+    Ok(())
+}
 
 fn send_test_pattern(mister_ip: &str, modeline: &Modeline, scale: f64, duration_secs: u64) -> Result<()> {
     let w = modeline.h_active as usize;
