@@ -1,5 +1,6 @@
 use anyhow::{bail, Context, Result};
 use clap::{Parser, Subcommand};
+use lz4_flex::compress_prepend_size;
 use socket2::{Domain, Protocol, Socket, Type};
 use std::io::Read;
 use std::net::UdpSocket;
@@ -438,10 +439,10 @@ fn stream_to_mister(
     let sock = Arc::new(Mutex::new(create_udp_socket(mister_ip)?));
     eprintln!("Connected to {}:{}", mister_ip, groovy::UDP_PORT);
 
-    // Init + Switchres
+    // Init: LZ4 compression, 48kHz audio, stereo, BGR24
     {
         let s = sock.lock().unwrap();
-        s.send(&groovy::build_init(0, 3, 2, 0))?;
+        s.send(&groovy::build_init(1, 3, 2, 0))?;
     }
     std::thread::sleep(Duration::from_millis(200));
     {
@@ -541,16 +542,16 @@ fn stream_to_mister(
 
         is_sending.store(true, Ordering::Relaxed);
 
-        // Each FFmpeg frame = one field (at field_rate)
-        // For interlaced: alternate field 0/1. For progressive: always field 0.
+        // LZ4 compress, then send header + compressed payload
         frame_count += 1;
+        let compressed = compress_prepend_size(&frame_data);
         {
             let s = sock.lock().unwrap();
-            let _ = s.send(&groovy::build_blit_field_vsync(frame_count, current_field, vsync, None));
+            let _ = s.send(&groovy::build_blit_field_vsync(frame_count, current_field, vsync, Some(compressed.len() as u32)));
             let mut off = 0;
-            while off < frame_data.len() {
-                let end = (off + mtu).min(frame_data.len());
-                let _ = s.send(&frame_data[off..end]);
+            while off < compressed.len() {
+                let end = (off + mtu).min(compressed.len());
+                let _ = s.send(&compressed[off..end]);
                 off = end;
             }
         }
@@ -759,7 +760,7 @@ fn stream_file(
     let _guard = MisterGuard { sock: sock.clone() };
     eprintln!("Connected to {}:{}", mister_ip, groovy::UDP_PORT);
 
-    { let s = sock.lock().unwrap(); s.send(&groovy::build_init(0, 3, 2, 0))?; }
+    { let s = sock.lock().unwrap(); s.send(&groovy::build_init(1, 3, 2, 0))?; }
     std::thread::sleep(Duration::from_millis(200));
     { let s = sock.lock().unwrap(); s.send(&groovy::build_switchres(modeline))?; }
     std::thread::sleep(Duration::from_millis(500));
@@ -818,13 +819,14 @@ fn stream_file(
         is_sending.store(true, Ordering::Relaxed);
 
         frame_count += 1;
+        let compressed = compress_prepend_size(&frame_data);
         {
             let s = sock.lock().unwrap();
-            let _ = s.send(&groovy::build_blit_field_vsync(frame_count, current_field, vsync, None));
+            let _ = s.send(&groovy::build_blit_field_vsync(frame_count, current_field, vsync, Some(compressed.len() as u32)));
             let mut off = 0;
-            while off < frame_data.len() {
-                let end = (off + mtu).min(frame_data.len());
-                let _ = s.send(&frame_data[off..end]);
+            while off < compressed.len() {
+                let end = (off + mtu).min(compressed.len());
+                let _ = s.send(&compressed[off..end]);
                 off = end;
             }
         }
