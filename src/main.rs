@@ -263,6 +263,21 @@ fn main() -> Result<()> {
     Ok(())
 }
 
+// ── MiSTer close guard — always sends CMD_CLOSE when dropped ──
+
+struct MisterGuard {
+    sock: Arc<Mutex<UdpSocket>>,
+}
+
+impl Drop for MisterGuard {
+    fn drop(&mut self) {
+        eprintln!("Sending close to MiSTer...");
+        if let Ok(s) = self.sock.lock() {
+            let _ = s.send(&groovy::build_close());
+        }
+    }
+}
+
 // ── Streaming ──
 
 fn stream_to_mister(
@@ -581,7 +596,7 @@ fn stream_to_mister(
         let _ = plex.report_progress(rating_key, final_ms, "stopped", duration_ms);
     }
 
-    { let _ = sock.lock().unwrap().send(&groovy::build_close()); }
+    // Guard sends close on drop
     running.store(false, Ordering::Relaxed);
     let _ = video_proc.kill();
     let _ = audio_proc.kill();
@@ -589,8 +604,6 @@ fn stream_to_mister(
     eprintln!("Done");
     Ok(())
 }
-
-// ── Helpers ──
 
 fn stream_file(
     path: &str, mister_ip: &str, modeline: &Modeline, scale: f64,
@@ -743,6 +756,7 @@ fn stream_file(
     eprintln!("Got first frame.");
 
     let sock = Arc::new(Mutex::new(create_udp_socket(mister_ip)?));
+    let _guard = MisterGuard { sock: sock.clone() };
     eprintln!("Connected to {}:{}", mister_ip, groovy::UDP_PORT);
 
     { let s = sock.lock().unwrap(); s.send(&groovy::build_init(0, 3, 2, 0))?; }
@@ -822,7 +836,7 @@ fn stream_file(
         if next_tick > now { spin_sleep::sleep(next_tick - now); } else { next_tick = now; }
     }
 
-    { let _ = sock.lock().unwrap().send(&groovy::build_close()); }
+    // Guard sends close on drop
     running.store(false, Ordering::Relaxed);
     let _ = video_proc.kill();
     let _ = audio_proc.kill();
