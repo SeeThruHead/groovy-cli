@@ -1,0 +1,207 @@
+Fri  3 Apr 2026 17:44:34 EDT: 5 tickets remaining.
+Fri  3 Apr 2026 17:44:34 EDT: Working on gc-bflf
+Fri  3 Apr 2026 17:44:34 EDT: Running pi for gc-bflf
+All passing:
+- **`cargo test`** — 16/16 tests pass (7 config tests + 9 groovy tests)
+- **`cargo build --release`** — ✅
+- **Warnings** — 8 total, all pre-existing (dead code in groovy.rs, plex.rs, connection.rs — not from config changes)
+
+**Summary of changes:**
+
+1. **`src/main.rs`** — Removed duplicate inline `Config`, `CustomModeline`, `ResolvedConfig`, `config_path()`, `load_config()` and the orphaned streaming loop code block (which caused a compile error). Added `mod config;` and wired up calls to `config::load()`, `config::config_path()`, `config::resolve()`.
+
+2. **`src/config.rs`** — Already had the correct extracted code with `Config`, `CustomModeline`, `ResolvedConfig`, `config_path()`, `load()`, `resolve()`, and 7 tests covering defaults, overrides, clamping, modeline lookup, unknown modeline, and custom modeline. No changes needed.
+
+3. **Fixed `build_blit_field_vsync` → `build_blit`** in main.rs and connection.rs (stale function name references).
+Fri  3 Apr 2026 17:46:47 EDT: Validating gc-bflf
+warning: method `socket` is never used
+   --> src/connection.rs:232:12
+    |
+ 23 | impl GroovyConnection {
+    | --------------------- method in this implementation
+...
+232 |     pub fn socket(&self) -> &UdpSocket {
+    |            ^^^^^^
+    |
+    = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: method `field_time_ns` is never used
+  --> src/groovy.rs:44:12
+   |
+22 | impl Modeline {
+   | ------------- method in this implementation
+...
+44 |     pub fn field_time_ns(&self) -> u64 {
+   |            ^^^^^^^^^^^^^
+
+warning: function `build_get_status` is never used
+   --> src/groovy.rs:111:8
+    |
+111 | pub fn build_get_status() -> Vec<u8> { vec![0x05] }
+    |        ^^^^^^^^^^^^^^^^
+
+warning: fields `vga_frameskip`, `vga_f1`, and `vram_queue` are never read
+   --> src/groovy.rs:124:9
+    |
+116 | pub struct FpgaStatus {
+    |            ---------- fields in this struct
+...
+124 |     pub vga_frameskip: bool,
+    |         ^^^^^^^^^^^^^
+125 |     pub vga_vblank: bool,
+126 |     pub vga_f1: bool,
+    |         ^^^^^^
+127 |     pub audio: bool,
+128 |     pub vram_queue: bool,
+    |         ^^^^^^^^^^
+    |
+    = note: `FpgaStatus` has derived impls for the traits `Clone` and `Debug`, but these are intentionally ignored during dead code analysis
+
+warning: field `show_title` is never read
+  --> src/plex.rs:31:9
+   |
+25 | pub struct Episode {
+   |            ------- field in this struct
+...
+31 |     pub show_title: String,
+   |         ^^^^^^^^^^
+   |
+   = note: `Episode` has derived impls for the traits `Clone` and `Debug`, but these are intentionally ignored during dead code analysis
+
+warning: field `title` is never read
+  --> src/plex.rs:37:9
+   |
+35 | pub struct MediaInfo {
+   |            --------- field in this struct
+36 |     pub direct_play_url: String,
+37 |     pub title: String,
+   |         ^^^^^
+   |
+   = note: `MediaInfo` has a derived impl for the trait `Debug`, but this is intentionally ignored during dead code analysis
+
+warning: method `recently_watched` is never used
+   --> src/plex.rs:117:12
+    |
+ 56 | impl PlexClient {
+    | --------------- method in this implementation
+...
+117 |     pub fn recently_watched(&self) -> Result<Vec<OnDeckItem>> {
+    |            ^^^^^^^^^^^^^^^^
+
+warning: `groovy-cli` (bin "groovy-cli" test) generated 7 warnings
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.08s
+     Running unittests src/main.rs (target/debug/deps/groovy_cli-235a62fc14102cdc)
+
+running 16 tests
+test config::tests::test_custom_modeline ... ok
+test config::tests::test_modeline_unknown ... ok
+test config::tests::test_resolve_cli_overrides ... ok
+test config::tests::test_resolve_with_token ... ok
+test config::tests::test_scale_clamping ... ok
+test config::tests::test_resolve_defaults ... ok
+test groovy::tests::test_build_audio ... ok
+test groovy::tests::test_build_blit_no_compression ... ok
+test config::tests::test_modeline_lookup ... ok
+test groovy::tests::test_build_blit_with_compression ... ok
+test groovy::tests::test_build_init ... ok
+test groovy::tests::test_build_switchres_size ... ok
+test groovy::tests::test_fpga_status_parse ... ok
+test groovy::tests::test_fpga_status_parse_too_short ... ok
+test groovy::tests::test_modeline_320x240p ... ok
+test groovy::tests::test_modeline_640x480i ... ok
+
+test result: ok. 16 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+warning: method `socket` is never used
+   --> src/connection.rs:232:12
+    |
+ 23 | impl GroovyConnection {
+    | --------------------- method in this implementation
+...
+232 |     pub fn socket(&self) -> &UdpSocket {
+    |            ^^^^^^
+    |
+    = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: methods `frame_rate`, `field_rate`, `field_height`, `field_size`, and `field_time_ns` are never used
+  --> src/groovy.rs:24:12
+   |
+22 | impl Modeline {
+   | ------------- methods in this implementation
+23 |     /// Frame rate in Hz (full frames, not fields)
+24 |     pub fn frame_rate(&self) -> f64 {
+   |            ^^^^^^^^^^
+...
+29 |     pub fn field_rate(&self) -> f64 {
+   |            ^^^^^^^^^^
+...
+34 |     pub fn field_height(&self) -> usize {
+   |            ^^^^^^^^^^^^
+...
+39 |     pub fn field_size(&self) -> usize {
+   |            ^^^^^^^^^^
+...
+44 |     pub fn field_time_ns(&self) -> u64 {
+   |            ^^^^^^^^^^^^^
+
+warning: function `build_get_status` is never used
+   --> src/groovy.rs:111:8
+    |
+111 | pub fn build_get_status() -> Vec<u8> { vec![0x05] }
+    |        ^^^^^^^^^^^^^^^^
+
+warning: fields `vram_end_frame`, `vga_frameskip`, `vga_f1`, `audio`, and `vram_queue` are never read
+   --> src/groovy.rs:122:9
+    |
+116 | pub struct FpgaStatus {
+    |            ---------- fields in this struct
+...
+122 |     pub vram_end_frame: bool,
+    |         ^^^^^^^^^^^^^^
+123 |     pub vram_synced: bool,
+124 |     pub vga_frameskip: bool,
+    |         ^^^^^^^^^^^^^
+125 |     pub vga_vblank: bool,
+126 |     pub vga_f1: bool,
+    |         ^^^^^^
+127 |     pub audio: bool,
+    |         ^^^^^
+128 |     pub vram_queue: bool,
+    |         ^^^^^^^^^^
+    |
+    = note: `FpgaStatus` has derived impls for the traits `Clone` and `Debug`, but these are intentionally ignored during dead code analysis
+
+warning: field `show_title` is never read
+  --> src/plex.rs:31:9
+   |
+25 | pub struct Episode {
+   |            ------- field in this struct
+...
+31 |     pub show_title: String,
+   |         ^^^^^^^^^^
+   |
+   = note: `Episode` has derived impls for the traits `Clone` and `Debug`, but these are intentionally ignored during dead code analysis
+
+warning: field `title` is never read
+  --> src/plex.rs:37:9
+   |
+35 | pub struct MediaInfo {
+   |            --------- field in this struct
+36 |     pub direct_play_url: String,
+37 |     pub title: String,
+   |         ^^^^^
+   |
+   = note: `MediaInfo` has a derived impl for the trait `Debug`, but this is intentionally ignored during dead code analysis
+
+warning: method `recently_watched` is never used
+   --> src/plex.rs:117:12
+    |
+ 56 | impl PlexClient {
+    | --------------- method in this implementation
+...
+117 |     pub fn recently_watched(&self) -> Result<Vec<OnDeckItem>> {
+    |            ^^^^^^^^^^^^^^^^
+
+warning: `groovy-cli` (bin "groovy-cli") generated 7 warnings
+    Finished `release` profile [optimized] target(s) in 0.09s
+Fri  3 Apr 2026 17:46:48 EDT: gc-bflf PASSED

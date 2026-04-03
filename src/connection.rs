@@ -87,7 +87,7 @@ impl GroovyConnection {
         let compressed = compress_prepend_size(frame_data);
 
         // Send header
-        let header = groovy::build_blit_field_vsync(
+        let header = groovy::build_blit(
             frame_num, field, vsync, Some(compressed.len() as u32),
         );
 

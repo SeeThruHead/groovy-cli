@@ -10,57 +10,16 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 mod auth;
+mod config;
 mod connection;
 mod groovy;
 mod plex;
 
+#[allow(unused_imports)]
+use config::CustomModeline;
 use groovy::{Modeline, MODELINES};
 
-// ── Config ──
 
-#[derive(serde::Deserialize, Default)]
-struct Config {
-    mister: Option<String>,
-    server: Option<String>,
-    port: Option<u16>,
-    token: Option<String>,
-    modeline: Option<String>,
-    /// Scale video to fit CRT (0.5-1.0). 1.0 = full size, 0.9 = 90% with black border.
-    scale: Option<f64>,
-    /// Custom modeline overrides. If present, used instead of preset.
-    custom_modeline: Option<CustomModeline>,
-}
-
-#[derive(serde::Deserialize, Clone)]
-struct CustomModeline {
-    p_clock: f64,
-    h_active: u16,
-    h_begin: u16,
-    h_end: u16,
-    h_total: u16,
-    v_active: u16,
-    v_begin: u16,
-    v_end: u16,
-    v_total: u16,
-    interlace: bool,
-}
-
-fn config_path() -> std::path::PathBuf {
-    let xdg = dirs::home_dir()
-        .map(|h| h.join(".config").join("groovy-cli").join("config.toml"))
-        .unwrap_or_default();
-    if xdg.exists() { return xdg; }
-    dirs::config_dir()
-        .map(|d| d.join("groovy-cli").join("config.toml"))
-        .unwrap_or(xdg)
-}
-
-fn load_config() -> Config {
-    let path = config_path();
-    if path.exists() {
-        toml::from_str(&std::fs::read_to_string(&path).unwrap_or_default()).unwrap_or_default()
-    } else { Config::default() }
-}
 
 // ── CLI ──
 
@@ -126,54 +85,18 @@ enum Commands {
     },
 }
 
-struct ResolvedConfig {
-    mister: String, server: String, port: u16, token: String,
-    modeline_name: String,
-    scale: f64,
-    custom_modeline: Option<CustomModeline>,
-}
 
-impl ResolvedConfig {
-    fn from(cli: &Cli, cfg: &Config) -> Result<Self> {
-        Ok(Self {
-            mister: cli.mister.clone().or_else(|| cfg.mister.clone()).unwrap_or_else(|| "192.168.0.115".into()),
-            server: cli.server.clone().or_else(|| cfg.server.clone()).unwrap_or_else(|| "localhost".into()),
-            port: cli.port.or(cfg.port).unwrap_or(32400),
-            token: cli.token.clone().or_else(|| cfg.token.clone()).context(
-                "No Plex token. Set via --token, PLEX_TOKEN env, or 'token' in ~/.config/groovy-cli/config.toml")?,
-            modeline_name: cli.modeline.clone().or_else(|| cfg.modeline.clone()).unwrap_or_else(|| "640x480i NTSC".into()),
-            scale: cli.scale.or(cfg.scale).unwrap_or(1.0).clamp(0.3, 1.0),
-            custom_modeline: cfg.custom_modeline.clone(),
-        })
-    }
-    fn modeline(&self) -> Result<Modeline> {
-        if let Some(ref cm) = self.custom_modeline {
-            return Ok(Modeline {
-                name: "custom",
-                p_clock: cm.p_clock, h_active: cm.h_active, h_begin: cm.h_begin,
-                h_end: cm.h_end, h_total: cm.h_total, v_active: cm.v_active,
-                v_begin: cm.v_begin, v_end: cm.v_end, v_total: cm.v_total,
-                interlace: cm.interlace,
-            });
-        }
-        MODELINES.iter().find(|m| m.name == self.modeline_name).copied().with_context(|| {
-            format!("Unknown modeline '{}'. Available:\n  {}", self.modeline_name,
-                MODELINES.iter().map(|m| m.name).collect::<Vec<_>>().join("\n  "))
-        })
-    }
-    fn plex(&self) -> plex::PlexClient { plex::PlexClient::new(&self.server, self.port, &self.token) }
-}
 
 // ── Main ──
 
 fn main() -> Result<()> {
     let cli = Cli::parse();
-    let cfg = load_config();
+    let cfg = config::load();
 
     match &cli.command {
         Commands::Auth => {
             let token = auth::plex_oauth()?;
-            let path = config_path();
+            let path = config::config_path();
             if let Some(p) = path.parent() { std::fs::create_dir_all(p)?; }
             let mut t = if path.exists() {
                 std::fs::read_to_string(&path)?.parse::<toml::Table>().unwrap_or_default()
@@ -185,7 +108,7 @@ fn main() -> Result<()> {
         }
         Commands::Modelines => { for m in MODELINES { println!("{}", m.name); } return Ok(()); }
         Commands::Config => {
-            let p = config_path();
+            let p = config::config_path();
             println!("Config: {}", p.display());
             if p.exists() { println!("{}", std::fs::read_to_string(&p)?); }
             else { println!("(not found)\n\nExample:\n  mister = \"192.168.0.115\"\n  server = \"192.168.0.29\"\n  port = 32400\n  token = \"your-token\"\n  modeline = \"640x480i NTSC\""); }
@@ -194,7 +117,10 @@ fn main() -> Result<()> {
         _ => {}
     }
 
-    let rcfg = ResolvedConfig::from(&cli, &cfg)?;
+    let rcfg = config::resolve(
+        cli.mister.clone(), cli.server.clone(), cli.port,
+        cli.token.clone(), cli.modeline.clone(), cli.scale, &cfg,
+    )?;
     let plex = rcfg.plex();
 
     match &cli.command {
@@ -535,78 +461,6 @@ fn stream_to_mister(
     Ok(())
 }
 
-        let frame = latest_frame.lock().unwrap().clone();
-        let Some(frame_data) = frame else {
-            spin_sleep::sleep(Duration::from_millis(1));
-            continue;
-        };
-
-        is_sending.store(true, Ordering::Relaxed);
-
-        // LZ4 compress, then send header + compressed payload
-        frame_count += 1;
-        let compressed = compress_prepend_size(&frame_data);
-        {
-            let s = sock.lock().unwrap();
-            let _ = s.send(&groovy::build_blit_field_vsync(frame_count, current_field, vsync, Some(compressed.len() as u32)));
-            let mut off = 0;
-            while off < compressed.len() {
-                let end = (off + mtu).min(compressed.len());
-                let _ = s.send(&compressed[off..end]);
-                off = end;
-            }
-        }
-
-        if modeline.interlace {
-            current_field = if current_field == 0 { 1 } else { 0 };
-        }
-
-        is_sending.store(false, Ordering::Relaxed);
-
-        if frame_count == 5 || frame_count % 1800 == 0 {
-            eprintln!("Frame {}", frame_count);
-        }
-
-        // Precise sleep until next tick (spin_sleep hybrid: sleep then spin for last ~1ms)
-        next_tick += field_interval;
-        let now = Instant::now();
-        if next_tick > now {
-            spin_sleep::sleep(next_tick - now);
-        } else {
-            // Fell behind — skip to now instead of bursting
-            next_tick = now;
-        }
-
-        // Report progress to Plex every 10s
-        if last_progress.elapsed() >= progress_interval {
-            let elapsed_ms = playback_start.elapsed().as_millis() as u64;
-            let current_ms = start_offset_ms + elapsed_ms;
-            let _ = plex.report_progress(rating_key, current_ms, "playing", duration_ms);
-            last_progress = Instant::now();
-        }
-    }
-
-    // Report final position to Plex
-    let elapsed_ms = playback_start.elapsed().as_millis() as u64;
-    let final_ms = start_offset_ms + elapsed_ms;
-    if duration_ms > 0 && final_ms >= duration_ms.saturating_sub(60_000) {
-        // Within last minute — mark as watched
-        eprintln!("Marking as watched");
-        let _ = plex.scrobble(rating_key);
-    } else {
-        eprintln!("Saving position: {}s", final_ms / 1000);
-        let _ = plex.report_progress(rating_key, final_ms, "stopped", duration_ms);
-    }
-
-    // Guard sends close on drop
-    running.store(false, Ordering::Relaxed);
-    let _ = video_proc.kill();
-    let _ = audio_proc.kill();
-    audio_thread.join().ok();
-    eprintln!("Done");
-    Ok(())
-}
-
 fn stream_file(
     path: &str, mister_ip: &str, modeline: &Modeline, scale: f64,
     audio_track: Option<u32>, sub_option: Option<&str>, seek_override: Option<f64>,
@@ -823,7 +677,7 @@ fn stream_file(
         let compressed = compress_prepend_size(&frame_data);
         {
             let s = sock.lock().unwrap();
-            let _ = s.send(&groovy::build_blit_field_vsync(frame_count, current_field, vsync, Some(compressed.len() as u32)));
+            let _ = s.send(&groovy::build_blit(frame_count, current_field, vsync, Some(compressed.len() as u32)));
             let mut off = 0;
             while off < compressed.len() {
                 let end = (off + mtu).min(compressed.len());
@@ -972,7 +826,7 @@ fn send_test_pattern(mister_ip: &str, modeline: &Modeline, scale: f64, duration_
             &field0
         };
 
-        let _ = sock.send(&groovy::build_blit_field_vsync(frame_count, current_field, vsync, None));
+        let _ = sock.send(&groovy::build_blit(frame_count, current_field, vsync, None));
         let mut off = 0;
         while off < data.len() {
             let end = (off + mtu).min(data.len());
