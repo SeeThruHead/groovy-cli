@@ -28,12 +28,14 @@ pub struct Episode {
     pub season: u32,
     pub episode: u32,
     pub view_count: u32,
+    #[allow(dead_code)]
     pub show_title: String,
 }
 
 #[derive(Debug)]
 pub struct MediaInfo {
     pub direct_play_url: String,
+    #[allow(dead_code)]
     pub title: String,
     pub duration_ms: u64,
     pub view_offset_ms: u64,
@@ -114,6 +116,7 @@ impl PlexClient {
     }
 
     /// Get recently watched items
+    #[allow(dead_code)]
     pub fn recently_watched(&self) -> Result<Vec<OnDeckItem>> {
         // Get recently viewed episodes/movies with viewCount > 0
         let xml = self.get("/library/recentlyViewed")?;
