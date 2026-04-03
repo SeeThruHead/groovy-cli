@@ -12,6 +12,7 @@ use std::time::{Duration, Instant};
 mod auth;
 mod config;
 mod connection;
+#[allow(dead_code)]
 mod groovy;
 mod plex;
 

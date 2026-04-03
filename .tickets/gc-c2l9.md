@@ -1,6 +1,6 @@
 ---
 id: gc-c2l9
-status: open
+status: closed
 deps: []
 links: []
 created: 2026-04-03T21:40:07Z
