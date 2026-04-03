@@ -355,3 +355,168 @@ warning: method `recently_watched` is never used
 warning: `groovy-cli` (bin "groovy-cli") generated 4 warnings
     Finished `release` profile [optimized] target(s) in 0.05s
 Fri  3 Apr 2026 17:49:01 EDT: gc-c2l9 PASSED
+Fri  3 Apr 2026 17:49:01 EDT: --- iteration done ---
+Fri  3 Apr 2026 17:49:01 EDT: 4 tickets remaining.
+Fri  3 Apr 2026 17:49:01 EDT: Working on gc-cbne
+Fri  3 Apr 2026 17:49:01 EDT: Running pi for gc-cbne
+All 49 tests pass (15 new ffmpeg tests + 34 existing). Release builds clean. The only warnings are pre-existing dead code in `connection.rs` and `plex.rs`.
+
+**Summary of changes:**
+
+**`src/ffmpeg.rs`** — Clean module with:
+- **Pure functions**: `build_video_args()`, `build_audio_args()`, `build_sub_extract_args()` — no I/O, fully testable
+- **I/O functions**: `find_ffmpeg()`, `extract_subs()` (now takes flexible `sub_map` string + `ext`), `start()` (pipeline with latest-frame model)
+- **15 tests** covering: basic args, seek, subtitles, scale, scale+subs, interlaced dimensions, FPS format, audio with/without seek, specific streams, sub extraction args, even alignment
+
+**`src/main.rs`** — Refactored to use `ffmpeg::` module:
+- Removed duplicated `find_ffmpeg()` 
+- `stream_to_mister()` now builds `ffmpeg::VideoParams` and calls `ffmpeg::start()` + `ffmpeg::extract_subs()`
+- `stream_file()` same pattern — builds params, delegates to `ffmpeg::`
+- `send_test_pattern()` uses `modeline.field_height()` / `field_rate()` / `field_size()` helpers
+- Removed unused `Command` import
+Fri  3 Apr 2026 18:00:54 EDT: Validating gc-cbne
+warning: method `socket` is never used
+   --> src/connection.rs:232:12
+    |
+ 23 | impl GroovyConnection {
+    | --------------------- method in this implementation
+...
+232 |     pub fn socket(&self) -> &UdpSocket {
+    |            ^^^^^^
+    |
+    = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: field `show_title` is never read
+  --> src/plex.rs:31:9
+   |
+25 | pub struct Episode {
+   |            ------- field in this struct
+...
+31 |     pub show_title: String,
+   |         ^^^^^^^^^^
+   |
+   = note: `Episode` has derived impls for the traits `Clone` and `Debug`, but these are intentionally ignored during dead code analysis
+
+warning: field `title` is never read
+  --> src/plex.rs:37:9
+   |
+35 | pub struct MediaInfo {
+   |            --------- field in this struct
+36 |     pub direct_play_url: String,
+37 |     pub title: String,
+   |         ^^^^^
+   |
+   = note: `MediaInfo` has a derived impl for the trait `Debug`, but this is intentionally ignored during dead code analysis
+
+warning: method `recently_watched` is never used
+   --> src/plex.rs:117:12
+    |
+ 56 | impl PlexClient {
+    | --------------- method in this implementation
+...
+117 |     pub fn recently_watched(&self) -> Result<Vec<OnDeckItem>> {
+    |            ^^^^^^^^^^^^^^^^
+
+warning: `groovy-cli` (bin "groovy-cli" test) generated 4 warnings
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.05s
+     Running unittests src/main.rs (target/debug/deps/groovy_cli-235a62fc14102cdc)
+
+running 49 tests
+test config::tests::test_custom_modeline ... ok
+test config::tests::test_resolve_defaults ... ok
+test config::tests::test_resolve_with_token ... ok
+test config::tests::test_resolve_cli_overrides ... ok
+test config::tests::test_modeline_lookup ... ok
+test config::tests::test_modeline_unknown ... ok
+test config::tests::test_scale_clamping ... ok
+test ffmpeg::tests::test_audio_args_basic ... ok
+test ffmpeg::tests::test_audio_args_no_seek ... ok
+test ffmpeg::tests::test_audio_args_specific_stream ... ok
+test ffmpeg::tests::test_audio_args_with_seek ... ok
+test ffmpeg::tests::test_sub_extract_args_basic ... ok
+test ffmpeg::tests::test_sub_extract_args_relative_map ... ok
+test ffmpeg::tests::test_scale_even_alignment ... ok
+test ffmpeg::tests::test_sub_extract_args_with_seek ... ok
+test ffmpeg::tests::test_video_args_basic ... ok
+test ffmpeg::tests::test_video_args_fps_format ... ok
+test ffmpeg::tests::test_video_args_interlaced_dimensions ... ok
+test ffmpeg::tests::test_video_args_scale_with_subs ... ok
+test ffmpeg::tests::test_video_args_with_scale ... ok
+test ffmpeg::tests::test_video_args_with_seek ... ok
+test groovy::tests::test_all_modelines_sane ... ok
+test ffmpeg::tests::test_video_args_with_subtitles ... ok
+test groovy::tests::test_build_audio ... ok
+test groovy::tests::test_build_audio_zero ... ok
+test groovy::tests::test_build_blit_max_frame ... ok
+test groovy::tests::test_build_blit_no_compression ... ok
+test groovy::tests::test_build_blit_with_compression ... ok
+test groovy::tests::test_build_close ... ok
+test groovy::tests::test_build_get_status ... ok
+test groovy::tests::test_build_init ... ok
+test groovy::tests::test_build_init_all_zeros ... ok
+test groovy::tests::test_build_switchres_all_modelines ... ok
+test groovy::tests::test_build_switchres_progressive ... ok
+test groovy::tests::test_build_switchres_roundtrip ... ok
+test groovy::tests::test_command_bytes_distinct ... ok
+test groovy::tests::test_fpga_status_all_bits_clear ... ok
+test groovy::tests::test_fpga_status_all_bits_set ... ok
+test groovy::tests::test_fpga_status_default ... ok
+test groovy::tests::test_fpga_status_each_bit ... ok
+test groovy::tests::test_fpga_status_parse ... ok
+test groovy::tests::test_fpga_status_parse_too_short ... ok
+test groovy::tests::test_fpga_status_parse_extra_bytes_ok ... ok
+test groovy::tests::test_modeline_320x240p_ntsc ... ok
+test groovy::tests::test_modeline_640x480i_ntsc ... ok
+test groovy::tests::test_modeline_720x576i_pal ... ok
+test groovy::tests::test_modeline_field_time_ns ... ok
+test groovy::tests::test_modeline_interlaced_field_rate_double_frame_rate ... ok
+test groovy::tests::test_modeline_progressive_field_rate_equals_frame_rate ... ok
+
+test result: ok. 49 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Compiling groovy-cli v0.1.0 (/Users/sth/code/groovy-cli)
+warning: method `socket` is never used
+   --> src/connection.rs:232:12
+    |
+ 23 | impl GroovyConnection {
+    | --------------------- method in this implementation
+...
+232 |     pub fn socket(&self) -> &UdpSocket {
+    |            ^^^^^^
+    |
+    = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: field `show_title` is never read
+  --> src/plex.rs:31:9
+   |
+25 | pub struct Episode {
+   |            ------- field in this struct
+...
+31 |     pub show_title: String,
+   |         ^^^^^^^^^^
+   |
+   = note: `Episode` has derived impls for the traits `Clone` and `Debug`, but these are intentionally ignored during dead code analysis
+
+warning: field `title` is never read
+  --> src/plex.rs:37:9
+   |
+35 | pub struct MediaInfo {
+   |            --------- field in this struct
+36 |     pub direct_play_url: String,
+37 |     pub title: String,
+   |         ^^^^^
+   |
+   = note: `MediaInfo` has a derived impl for the trait `Debug`, but this is intentionally ignored during dead code analysis
+
+warning: method `recently_watched` is never used
+   --> src/plex.rs:117:12
+    |
+ 56 | impl PlexClient {
+    | --------------- method in this implementation
+...
+117 |     pub fn recently_watched(&self) -> Result<Vec<OnDeckItem>> {
+    |            ^^^^^^^^^^^^^^^^
+
+warning: `groovy-cli` (bin "groovy-cli") generated 4 warnings
+    Finished `release` profile [optimized] target(s) in 2.14s
+Fri  3 Apr 2026 18:00:56 EDT: gc-cbne PASSED
