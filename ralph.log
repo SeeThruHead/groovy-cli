@@ -1362,3 +1362,115 @@ test result: ok. 90 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; fin
 
     Finished `release` profile [optimized] target(s) in 0.05s
 Fri  3 Apr 2026 18:18:50 EDT: gc-tcm7 PASSED
+Fri  3 Apr 2026 18:18:51 EDT: --- iteration done ---
+Fri  3 Apr 2026 18:18:51 EDT: 1 tickets remaining.
+Fri  3 Apr 2026 18:18:51 EDT: Working on gc-q73b
+Fri  3 Apr 2026 18:18:51 EDT: Running pi for gc-q73b
+Everything passes:
+
+- ✅ **90 tests pass** — zero failures
+- ✅ **`cargo build --release`** — compiles clean
+- ✅ **Zero warnings** 
+- ✅ **CLI `--help`** works with all expected commands: `search`, `episodes`, `play`, `play-key`, `file`, `continue`, `libraries`, `modelines`, `config`, `auth`, `stop`, `test-pattern`
+
+The ticket acceptance criteria are met. The codebase is clean and ready for the next ticket (gc-ecqu: commit and push).
+Fri  3 Apr 2026 18:19:10 EDT: Validating gc-q73b
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.05s
+     Running unittests src/main.rs (target/debug/deps/groovy_cli-235a62fc14102cdc)
+
+running 90 tests
+test config::tests::test_modeline_lookup ... ok
+test config::tests::test_resolve_cli_overrides ... ok
+test config::tests::test_resolve_with_token ... ok
+test config::tests::test_custom_modeline ... ok
+test config::tests::test_resolve_defaults ... ok
+test config::tests::test_modeline_unknown ... ok
+test config::tests::test_scale_clamping ... ok
+test connection::tests::test_close_on_drop ... ok
+test connection::tests::test_connect_invalid_address ... ok
+test connection::tests::test_audio_send ... ok
+test connection::tests::test_connect_to_mock ... ok
+test connection::tests::test_blit_lz4_compressed ... ok
+test connection::tests::test_congestion_control_activates_for_large_frames ... ok
+test connection::tests::test_blit_interlaced_fields ... ok
+test connection::tests::test_socket_accessor ... ok
+test connection::tests::test_blit_multiple_frames ... ok
+test ffmpeg::tests::test_audio_args_basic ... ok
+test ffmpeg::tests::test_audio_args_no_seek ... ok
+test ffmpeg::tests::test_audio_args_specific_stream ... ok
+test ffmpeg::tests::test_audio_args_with_seek ... ok
+test ffmpeg::tests::test_scale_even_alignment ... ok
+test ffmpeg::tests::test_sub_extract_args_basic ... ok
+test ffmpeg::tests::test_sub_extract_args_relative_map ... ok
+test ffmpeg::tests::test_sub_extract_args_with_seek ... ok
+test ffmpeg::tests::test_video_args_basic ... ok
+test ffmpeg::tests::test_video_args_fps_format ... ok
+test ffmpeg::tests::test_video_args_interlaced_dimensions ... ok
+test ffmpeg::tests::test_video_args_scale_with_subs ... ok
+test ffmpeg::tests::test_video_args_with_scale ... ok
+test ffmpeg::tests::test_video_args_with_seek ... ok
+test ffmpeg::tests::test_video_args_with_subtitles ... ok
+test groovy::tests::test_all_modelines_sane ... ok
+test groovy::tests::test_build_audio ... ok
+test groovy::tests::test_build_audio_zero ... ok
+test groovy::tests::test_build_blit_max_frame ... ok
+test groovy::tests::test_build_blit_no_compression ... ok
+test groovy::tests::test_build_blit_with_compression ... ok
+test groovy::tests::test_build_close ... ok
+test groovy::tests::test_build_get_status ... ok
+test groovy::tests::test_build_init ... ok
+test groovy::tests::test_build_init_all_zeros ... ok
+test groovy::tests::test_build_switchres_all_modelines ... ok
+test groovy::tests::test_build_switchres_progressive ... ok
+test groovy::tests::test_build_switchres_roundtrip ... ok
+test groovy::tests::test_command_bytes_distinct ... ok
+test groovy::tests::test_fpga_status_all_bits_clear ... ok
+test groovy::tests::test_fpga_status_all_bits_set ... ok
+test groovy::tests::test_fpga_status_default ... ok
+test groovy::tests::test_fpga_status_each_bit ... ok
+test groovy::tests::test_fpga_status_parse ... ok
+test groovy::tests::test_fpga_status_parse_extra_bytes_ok ... ok
+test groovy::tests::test_fpga_status_parse_too_short ... ok
+test groovy::tests::test_modeline_320x240p_ntsc ... ok
+test groovy::tests::test_modeline_640x480i_ntsc ... ok
+test groovy::tests::test_modeline_720x576i_pal ... ok
+test groovy::tests::test_modeline_field_time_ns ... ok
+test groovy::tests::test_modeline_interlaced_field_rate_double_frame_rate ... ok
+test groovy::tests::test_modeline_progressive_field_rate_equals_frame_rate ... ok
+test connection::tests::test_init_sets_timing_fields ... ok
+test connection::tests::test_explicit_close_then_drop ... ok
+test connection::tests::test_init_sends_init_and_switchres ... ok
+test mock_server::tests::test_mock_audio ... ok
+test mock_server::tests::test_mock_close ... ok
+test connection::tests::test_wait_sync_does_not_hang ... ok
+test mock_server::tests::test_mock_blit_compressed_lz4 ... ok
+test mock_server::tests::test_mock_init_and_ack ... ok
+test mock_server::tests::test_mock_init_wrong_size ... ok
+test connection::tests::test_full_session ... ok
+test streamer::tests::test_extract_file_subs_disabled_none ... ok
+test streamer::tests::test_extract_file_subs_disabled_off ... ok
+test streamer::tests::test_extract_file_subs_non_numeric ... ok
+test streamer::tests::test_extract_plex_subs_none ... ok
+test streamer::tests::test_stream_file_not_found ... ok
+test mock_server::tests::test_mock_full_session ... ok
+test test_pattern::tests::test_generate_pattern_center_crosshair ... ok
+test test_pattern::tests::test_generate_pattern_has_white_border ... ok
+test test_pattern::tests::test_generate_pattern_deterministic ... ok
+test test_pattern::tests::test_generate_pattern_not_all_black ... ok
+test test_pattern::tests::test_generate_pattern_scaled_has_black_padding ... ok
+test test_pattern::tests::test_generate_pattern_size ... ok
+test test_pattern::tests::test_generate_pattern_size_640x480 ... ok
+test test_pattern::tests::test_split_fields_interlaced ... ok
+test test_pattern::tests::test_split_fields_modeline_sizes ... ok
+test test_pattern::tests::test_split_fields_progressive ... ok
+test test_pattern::tests::test_split_fields_progressive_modeline ... ok
+test test_pattern::tests::test_generate_pattern_various_scales ... ok
+test mock_server::tests::test_mock_switchres ... ok
+test mock_server::tests::test_mock_unknown_command ... ok
+test mock_server::tests::test_mock_multiple_blits ... ok
+test mock_server::tests::test_integration_stream_test_pattern_to_mock ... ok
+
+test result: ok. 90 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.90s
+
+    Finished `release` profile [optimized] target(s) in 0.05s
+Fri  3 Apr 2026 18:19:12 EDT: gc-q73b PASSED
