@@ -10,6 +10,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 mod auth;
+mod connection;
 mod groovy;
 mod plex;
 
@@ -435,104 +436,104 @@ fn stream_to_mister(
     }
     eprintln!("Got first frame.");
 
-    // Single socket for video + audio
-    let sock = Arc::new(Mutex::new(create_udp_socket(mister_ip)?));
+    // Connect with FPGA feedback, LZ4, congestion control, raster sync
+    let conn = Arc::new(Mutex::new(connection::GroovyConnection::connect(mister_ip)?));
     eprintln!("Connected to {}:{}", mister_ip, groovy::UDP_PORT);
+    { conn.lock().unwrap().init(modeline)?; }
 
-    // Init: LZ4 compression, 48kHz audio, stereo, BGR24
-    {
-        let s = sock.lock().unwrap();
-        s.send(&groovy::build_init(1, 3, 2, 0))?;
-    }
-    std::thread::sleep(Duration::from_millis(200));
-    {
-        let s = sock.lock().unwrap();
-        s.send(&groovy::build_switchres(modeline))?;
-    }
-    std::thread::sleep(Duration::from_millis(500));
-
-    // Audio thread — 3-phase sync: discard until video ready, skip 300ms, then send
-    let audio_sock = sock.clone();
+    // Audio thread — 3-phase sync, shared connection
+    let audio_conn = conn.clone();
     let audio_running = running.clone();
     let audio_first = first_video_frame.clone();
     let audio_thread = std::thread::Builder::new().name("audio".into()).spawn(move || {
         let mut reader = audio_stdout;
         let mut buf = vec![0u8; 4800];
-
         // Phase 1: discard until first video frame
         while audio_running.load(Ordering::Relaxed) {
             if audio_first.load(Ordering::Relaxed) { break; }
-            match reader.read(&mut buf[..3840]) {
-                Ok(0) | Err(_) => return,
-                _ => {}
-            }
+            match reader.read(&mut buf[..3840]) { Ok(0) | Err(_) => return, _ => {} }
         }
-
-        // Phase 2: discard ~300ms (48000Hz * 2ch * 2bytes * 0.3s = 57600)
+        // Phase 2: discard ~300ms
         let mut discarded = 0;
         while discarded < 57600 && audio_running.load(Ordering::Relaxed) {
             let n = std::cmp::min(3840, 57600 - discarded);
-            match reader.read(&mut buf[..n]) {
-                Ok(0) | Err(_) => return,
-                Ok(n) => discarded += n,
-            }
+            match reader.read(&mut buf[..n]) { Ok(0) | Err(_) => return, Ok(n) => discarded += n }
         }
-
-        // Phase 3: send audio via shared socket (wireLock = Mutex)
-        // Groovy protocol: header then chunked payload
-        // = header as one send(), then payload chunked in MTU-sized sends
-        let mtu = groovy::DEFAULT_MTU;
+        // Phase 3: send audio
         while audio_running.load(Ordering::Relaxed) {
             match reader.read(&mut buf) {
                 Ok(0) | Err(_) => break,
-                Ok(n) => {
-                    let hdr = groovy::build_audio(n as u16);
-                    let s = audio_sock.lock().unwrap();
-                    let _ = s.send(&hdr);
-                    // Chunk payload into MTU-sized sends
-                    let mut off = 0;
-                    while off < n {
-                        let end = (off + mtu).min(n);
-                        let _ = s.send(&buf[off..end]);
-                        off = end;
-                    }
-                    drop(s);
-                }
+                Ok(n) => { audio_conn.lock().unwrap().audio(&buf[..n]); }
             }
         }
     })?;
 
-    // Field-rate send loop:
-    // - Timer fires at field_rate
-    // - If still sending previous frame, SKIP (isSending guard)
-    // - Grab latest frame, split fields if interlaced, send
+    // Streaming loop with FPGA raster sync
     let mut frame_count: u32 = 0;
     let mut current_field: u8 = 0;
-    let mtu = groovy::DEFAULT_MTU;
     let vsync = modeline.v_begin;
-    let field_interval_us = std::cmp::max(8000, (1_000_000.0 / field_rate) as u64);
-    let field_interval = Duration::from_micros(field_interval_us);
-    let is_sending = AtomicBool::new(false);
-    let mut next_tick = Instant::now();
-
-    // Progress reporting to Plex
     let progress_interval = Duration::from_secs(10);
     let mut last_progress = Instant::now();
     let start_offset_ms = media.view_offset_ms;
     let duration_ms = media.duration_ms;
     let playback_start = Instant::now();
 
-    eprintln!("Streaming (interval={}us)...", field_interval_us);
+    eprintln!("Streaming with FPGA sync + LZ4...");
 
     while running.load(Ordering::Relaxed) {
         if video_ended.load(Ordering::Relaxed) { eprintln!("Stream ended"); break; }
 
-        // isSending guard: skip if previous send still in progress
-        if is_sending.load(Ordering::Relaxed) {
-            next_tick += field_interval;
-            spin_sleep::sleep(field_interval);
+        let frame = latest_frame.lock().unwrap().clone();
+        let Some(frame_data) = frame else {
+            spin_sleep::sleep(Duration::from_millis(1));
             continue;
+        };
+
+        let field_start = Instant::now();
+        frame_count += 1;
+
+        { conn.lock().unwrap().blit(&frame_data, frame_count, current_field, vsync); }
+
+        if modeline.interlace {
+            current_field = if current_field == 0 { 1 } else { 0 };
         }
+
+        if frame_count == 5 || frame_count % 1800 == 0 {
+            let s = conn.lock().unwrap();
+            eprintln!("Frame {} (synced={} vblank={} ready={})",
+                frame_count, s.status.vram_synced, s.status.vga_vblank, s.status.vram_ready);
+        }
+
+        // Raster-aware sync
+        let elapsed_ns = field_start.elapsed().as_nanos() as u64;
+        { conn.lock().unwrap().wait_sync(elapsed_ns); }
+
+        // Plex progress
+        if last_progress.elapsed() >= progress_interval {
+            let current_ms = start_offset_ms + playback_start.elapsed().as_millis() as u64;
+            let _ = plex.report_progress(rating_key, current_ms, "playing", duration_ms);
+            last_progress = Instant::now();
+        }
+    }
+
+    // Report final position to Plex
+    let final_ms = start_offset_ms + playback_start.elapsed().as_millis() as u64;
+    if duration_ms > 0 && final_ms >= duration_ms.saturating_sub(60_000) {
+        eprintln!("Marking as watched");
+        let _ = plex.scrobble(rating_key);
+    } else {
+        eprintln!("Saving position: {}s", final_ms / 1000);
+        let _ = plex.report_progress(rating_key, final_ms, "stopped", duration_ms);
+    }
+
+    // Connection sends close on drop
+    running.store(false, Ordering::Relaxed);
+    let _ = video_proc.kill();
+    let _ = audio_proc.kill();
+    audio_thread.join().ok();
+    eprintln!("Done");
+    Ok(())
+}
 
         let frame = latest_frame.lock().unwrap().clone();
         let Some(frame_data) = frame else {
