@@ -1,6 +1,6 @@
 ---
 id: gc-hopt
-status: open
+status: closed
 deps: []
 links: []
 created: 2026-04-03T21:40:32Z

@@ -14,6 +14,8 @@ mod connection;
 mod ffmpeg;
 #[allow(dead_code)]
 mod groovy;
+#[cfg(test)]
+mod mock_server;
 mod plex;
 
 #[allow(unused_imports)]
